@@ -1,7 +1,21 @@
 <template>
   <div class="container">
     <video ref="video" autoplay playsinline class="video"></video>
-    <canvas ref="canvas" class="overlay"></canvas>
+
+    <!-- POPUPS -->
+    <div v-for="(face, i) in faces" :key="i" class="popup" :style="getStyle(face)">
+      {{ face.name }}
+    </div>
+
+    <!-- PANEL -->
+    <div class="panel">
+      <input v-model="name" placeholder="Enter name" />
+      <button @click="addFace">Add Face</button>
+    </div>
+    <div class="panel-r popup">
+      <p>Harshith</p>
+      <p>Likes Sports and girls</p>
+    </div>
   </div>
 </template>
 
@@ -10,7 +24,8 @@ import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
 const video = ref(null)
-const canvas = ref(null)
+const faces = ref([])
+const name = ref('')
 
 let isProcessing = false
 
@@ -18,28 +33,23 @@ onMounted(async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ video: true })
   video.value.srcObject = stream
 
-  video.value.onloadedmetadata = () => {
-    canvas.value.width = video.value.videoWidth
-    canvas.value.height = video.value.videoHeight
-
-    startRecognition()
-  }
+  startLoop()
 })
 
 function captureFrame() {
-  const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = video.value.videoWidth
-  tempCanvas.height = video.value.videoHeight
+  const canvas = document.createElement('canvas')
+  canvas.width = 320
+  canvas.height = 240
 
-  const ctx = tempCanvas.getContext('2d')
-  ctx.drawImage(video.value, 0, 0)
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(video.value, 0, 0, 320, 240)
 
   return new Promise((resolve) => {
-    tempCanvas.toBlob((blob) => resolve(blob), 'image/jpeg')
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
   })
 }
 
-async function startRecognition() {
+async function startLoop() {
   setInterval(async () => {
     if (isProcessing) return
     isProcessing = true
@@ -52,58 +62,65 @@ async function startRecognition() {
 
       const res = await axios.post('http://localhost:8120/recognize', formData)
 
-      drawOverlay(res.data)
+      // 🔥 scale to screen
+      const scaleX = video.value.videoWidth / 320
+      const scaleY = video.value.videoHeight / 240
+
+      faces.value = res.data.map((face) => ({
+        name: face.name,
+        location: [
+          face.location[0] * scaleY,
+          face.location[1] * scaleX,
+          face.location[2] * scaleY,
+          face.location[3] * scaleX,
+        ],
+      }))
     } catch (err) {
       console.error(err)
     }
 
     isProcessing = false
-  }, 1) // every 1 second
+  }, 1000)
 }
 
-function drawOverlay(faces) {
-  const ctx = canvas.value.getContext('2d')
+function getStyle(face) {
+  const [top, , , left] = face.location
 
-  ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
+  return {
+    top: `${top}px`,
+    left: `${left}px`,
+  }
+}
+
+async function addFace() {
+  if (!name.value) {
+    alert('Enter name')
+    return
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = video.value.videoWidth
+  canvas.height = video.value.videoHeight
+
+  const ctx = canvas.getContext('2d')
   ctx.drawImage(video.value, 0, 0)
 
-  faces.forEach((face) => {
-    const [top, right, bottom, left] = face.location
+  canvas.toBlob(async (blob) => {
+    const formData = new FormData()
+    formData.append('file', blob)
+    formData.append('name', name.value)
 
-    const width = right - left
-    const height = bottom - top
-
-    // 🔴 Box
-    // ctx.strokeStyle = '#00FFAA'
-    // ctx.lineWidth = 3
-    // ctx.strokeRect(left, top, width, height)
-
-    // 🟢 Floating label
-    const label = face.name
-    ctx.font = '18px Arial'
-    const textWidth = ctx.measureText(label).width
-
-    const padding = 8
-    const boxX = left
-    const boxY = top - 30
-
-    // Background bubble
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
-    ctx.fillRect(boxX, boxY, textWidth + padding * 2, 25)
-
-    // Text
-    ctx.fillStyle = '#00FFAA'
-    ctx.fillText(label, boxX + padding, boxY + 18)
-  })
+    const res = await axios.post('http://localhost:8120/add-face', formData)
+    alert(res.data.message)
+  }, 'image/jpeg')
 }
 </script>
 
 <style>
 .container {
-  /* position: relative;
-  width: ;
-  height: 1000px; */
-  overflow: hidden;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
 }
 
 .video {
@@ -113,9 +130,29 @@ function drawOverlay(faces) {
   object-fit: cover;
 }
 
-.overlay {
+.popup {
   position: absolute;
-  width: 100%;
-  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #00ffaa;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.panel {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 10px;
+}
+.panel-r {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 40px;
+  border-radius: 10px;
 }
 </style>

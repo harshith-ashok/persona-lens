@@ -1,15 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-import face_recognition
-import numpy as np
-import pickle
 import cv2
+import numpy as np
+import face_recognition
+import pickle
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # your Vue app
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,11 +31,9 @@ def save_db(data):
         pickle.dump(data, f)
 
 
+# ✅ ADD FACE
 @app.post("/add-face")
-async def add_face(
-    name: str = Form(...),
-    file: UploadFile = File(...)
-):
+async def add_face(name: str = Form(...), file: UploadFile = File(...)):
     db = load_db()
 
     img = await file.read()
@@ -45,9 +43,9 @@ async def add_face(
     if image is None:
         return {"error": "Invalid image"}
 
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    encodings = face_recognition.face_encodings(rgb_image)
+    encodings = face_recognition.face_encodings(rgb)
 
     if len(encodings) == 0:
         return {"error": "No face found"}
@@ -60,6 +58,7 @@ async def add_face(
     return {"message": "Face added"}
 
 
+# ✅ MULTI FACE RECOGNITION
 @app.post("/recognize")
 async def recognize(file: UploadFile = File(...)):
     db = load_db()
@@ -67,38 +66,42 @@ async def recognize(file: UploadFile = File(...)):
     img = await file.read()
     np_img = np.frombuffer(img, np.uint8)
 
-    import cv2
     image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
     if image is None:
         return {"error": "Invalid image"}
 
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    face_locations = face_recognition.face_locations(rgb_image)
-    encodings = face_recognition.face_encodings(rgb_image, face_locations)
+    # 🔥 downscale for speed
+    small = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
+
+    locations = face_recognition.face_locations(small)
+    encodings = face_recognition.face_encodings(small, locations)
 
     results = []
 
-    for face_encoding, location in zip(encodings, face_locations):
+    for (top, right, bottom, left), enc in zip(locations, encodings):
 
-        if len(db["encodings"]) == 0:
-            name = "Unknown"
-        else:
-            matches = face_recognition.compare_faces(
-                db["encodings"], face_encoding)
-            distances = face_recognition.face_distance(
-                db["encodings"], face_encoding)
+        name = "Unknown"
 
-            best_match = np.argmin(distances)
+        if len(db["encodings"]) > 0:
+            matches = face_recognition.compare_faces(db["encodings"], enc)
+            distances = face_recognition.face_distance(db["encodings"], enc)
 
-            if matches[best_match] and distances[best_match] < 0.5:
-                name = db["names"][best_match]
-            else:
-                name = "Unknown"
+            best = np.argmin(distances)
+
+            if matches[best] and distances[best] < 0.6:
+                name = db["names"][best]
+
+        # scale back
+        top *= 2
+        right *= 2
+        bottom *= 2
+        left *= 2
 
         results.append({
             "name": name,
-            "location": location  # [top, right, bottom, left]
+            "location": [top, right, bottom, left]
         })
 
     return results
