@@ -1,0 +1,6 @@
+aiortc
+opencv-python
+face_recognition
+numpy
+fastapi
+uvicorn
