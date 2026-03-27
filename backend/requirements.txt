@@ -1,6 +1,10 @@
-aiortc
-opencv-python
-face_recognition
-numpy
 fastapi
 uvicorn
+python-multipart
+supabase
+python-jose
+opencv-python
+face-recognition
+numpy
+assemblyai
+python-dotenv

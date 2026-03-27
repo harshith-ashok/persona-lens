@@ -1,107 +1,87 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import cv2
-import numpy as np
-import face_recognition
-import pickle
+
+from auth import get_current_user
+from db import supabase
+from face import add_face_logic, recognize_logic
+from speech import process_audio
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-DB_FILE = "faces.pkl"
+
+@app.get("/me")
+def me(user=Depends(get_current_user)):
+    return {"patient_id": user["sub"]}
 
 
-def load_db():
+# ✅ Ensure patient
+@app.post("/ensure-patient")
+def ensure_patient(user=Depends(get_current_user)):
+    supabase.table("patients").upsert({
+        "id": user["sub"],
+        "full_name": "Patient"
+    }).execute()
+    return {"ok": True}
+
+
+# ✅ Create person
+@app.post("/person")
+def create_person(name: str = Form(...), user=Depends(get_current_user)):
     try:
-        with open(DB_FILE, "rb") as f:
-            return pickle.load(f)
-    except:
-        return {"encodings": [], "names": []}
+        patient_id = user["sub"]
+
+        res = supabase.table("known_persons").insert({
+            "patient_id": patient_id,
+            "name": name
+        }).execute()
+
+        if not res.data:
+            raise Exception(res)
+
+        return res.data[0]
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
-def save_db(data):
-    with open(DB_FILE, "wb") as f:
-        pickle.dump(data, f)
-
-
-# ✅ ADD FACE
+# ✅ Add face
 @app.post("/add-face")
-async def add_face(name: str = Form(...), file: UploadFile = File(...)):
-    db = load_db()
+async def add_face(
+    person_id: str = Form(...),
+    file: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    success = await add_face_logic(file, person_id)
 
-    img = await file.read()
-    np_img = np.frombuffer(img, np.uint8)
-
-    image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-    if image is None:
-        return {"error": "Invalid image"}
-
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    encodings = face_recognition.face_encodings(rgb)
-
-    if len(encodings) == 0:
-        return {"error": "No face found"}
-
-    db["encodings"].append(encodings[0])
-    db["names"].append(name)
-
-    save_db(db)
+    if not success:
+        raise HTTPException(400, "No face found")
 
     return {"message": "Face added"}
 
 
-# ✅ MULTI FACE RECOGNITION
+# ✅ Recognize
 @app.post("/recognize")
-async def recognize(file: UploadFile = File(...)):
-    db = load_db()
+async def recognize(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    patient_id = user["sub"]
+    return await recognize_logic(file, patient_id)
 
-    img = await file.read()
-    np_img = np.frombuffer(img, np.uint8)
 
-    image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-    if image is None:
-        return {"error": "Invalid image"}
-
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    # 🔥 downscale for speed
-    small = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
-
-    locations = face_recognition.face_locations(small)
-    encodings = face_recognition.face_encodings(small, locations)
-
-    results = []
-
-    for (top, right, bottom, left), enc in zip(locations, encodings):
-
-        name = "Unknown"
-
-        if len(db["encodings"]) > 0:
-            matches = face_recognition.compare_faces(db["encodings"], enc)
-            distances = face_recognition.face_distance(db["encodings"], enc)
-
-            best = np.argmin(distances)
-
-            if matches[best] and distances[best] < 0.6:
-                name = db["names"][best]
-
-        # scale back
-        top *= 2
-        right *= 2
-        bottom *= 2
-        left *= 2
-
-        results.append({
-            "name": name,
-            "location": [top, right, bottom, left]
-        })
-
-    return results
+# ✅ Speech
+@app.post("/process-interaction")
+async def process_interaction(
+    audio: UploadFile = File(...),
+    person_id: str = Form(None),
+    user=Depends(get_current_user)
+):
+    return await process_audio(audio, user["sub"], person_id)
