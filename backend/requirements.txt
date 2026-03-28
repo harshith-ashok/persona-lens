@@ -8,3 +8,5 @@ face-recognition
 numpy
 assemblyai
 python-dotenv
+requests
+openai-whisper

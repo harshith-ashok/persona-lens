@@ -1,51 +1,76 @@
-import os
-import assemblyai as aai
+import whisper
 import tempfile
+import os
 from db import supabase
+from llm import generate_summary
 
-aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
+model = whisper.load_model("base")
 
 
 async def process_audio(file, patient_id, person_id=None):
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(await file.read())
-        path = tmp.name
-
     try:
-        config = aai.TranscriptionConfig(
-            speaker_labels=True
-        )
+        # 💾 Save temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(await file.read())
+            path = tmp.name
 
-        transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(path, config=config)
+        # 🎤 Transcribe
+        result = model.transcribe(path)
+        transcript = result.get("text", "").strip()
 
-        if transcript.status == "error":
-            return {"error": transcript.error}
+        print("🧠 TRANSCRIPT:", transcript)
 
-        full_text = transcript.text
+        # 🧠 Generate summary (ONLY if person exists)
+        summary = None
+        if person_id and transcript:
+            summary = generate_summary(transcript)
 
-        segments = []
-        if transcript.utterances:
-            for utt in transcript.utterances:
-                segments.append({
-                    "speaker": f"Speaker {utt.speaker}",
-                    "text": utt.text,
-                    "start": utt.start / 1000,
-                    "end": utt.end / 1000
-                })
-
+        # 🗄️ Save interaction log
         log = supabase.table("interaction_logs").insert({
             "patient_id": patient_id,
             "known_person_id": person_id,
-            "transcript": full_text
+            "transcript": transcript
         }).execute()
 
+        log_id = log.data[0]["id"]
+
+        # 🧠 Update summaries
+        if person_id and summary:
+            existing = supabase.table("interaction_summaries") \
+                .select("*") \
+                .eq("known_person_id", person_id) \
+                .limit(1) \
+                .execute()
+
+            if not existing.data:
+                # ✅ FIRST TIME
+                supabase.table("interaction_summaries").insert({
+                    "known_person_id": person_id,
+                    "first_summary": summary,
+                    "first_occurred_at": "now()",
+                    "first_log_id": log_id,
+                    "last_summary": summary,
+                    "last_occurred_at": "now()",
+                    "last_log_id": log_id
+                }).execute()
+            else:
+                # ✅ UPDATE LAST
+                supabase.table("interaction_summaries").update({
+                    "last_summary": summary,
+                    "last_occurred_at": "now()",
+                    "last_log_id": log_id
+                }).eq("known_person_id", person_id).execute()
+
         return {
-            "transcript": full_text,
-            "segments": segments,
-            "log_id": log.data[0]["id"]
+            "transcript": transcript,
+            "summary": summary,
+            "log_id": log_id
         }
 
+    except Exception as e:
+        print("Process audio error:", e)
+        return {"error": str(e)}
+
     finally:
-        os.remove(path)
+        if os.path.exists(path):
+            os.remove(path)
