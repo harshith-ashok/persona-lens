@@ -92,6 +92,8 @@ async def add_face(
 # =========================
 # 🎥 RECOGNIZE FACE
 # =========================
+
+
 @app.post("/recognize")
 async def recognize(
     file: UploadFile = File(...),
@@ -164,4 +166,25 @@ def get_summary(person_id: str, user=Depends(get_current_user)):
 
     except Exception as e:
         print("Summary fetch error:", e)
+        raise HTTPException(500, str(e))
+
+
+@app.get("/relation/{person_id}")
+def get_relation(person_id: str, user=Depends(get_current_user)):
+    try:
+        res = supabase.table("known_persons") \
+            .select("relationship") \
+            .eq("id", person_id) \
+            .limit(1) \
+            .execute()
+
+        if not res.data or len(res.data) == 0:
+            return {"relation": None}
+
+        return {
+            "relation": res.data[0]["relationship"]
+        }
+
+    except Exception as e:
+        print("Relation fetch error:", e)
         raise HTTPException(500, str(e))
