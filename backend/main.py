@@ -22,6 +22,11 @@ app.add_middleware(
 # =========================
 
 
+@app.get('/health')
+def health():
+    return {'status': 200}
+
+
 @app.get("/me")
 def me(user=Depends(get_current_user)):
     return {"patient_id": user["sub"]}
