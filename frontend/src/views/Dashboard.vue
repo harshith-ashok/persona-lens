@@ -186,7 +186,7 @@ const video          = ref(null)
 const faces          = ref([])
 const trackedFaces   = ref({})
 const summaries      = ref({})
-const relations      = ref({}) // ✅ NEW
+const relations      = ref({})
 const name           = ref('')
 const isRecording    = ref(false)
 const mediaRecorder  = ref(null)
@@ -297,7 +297,6 @@ async function recognizeFrame() {
     }
   })
 
-  // Re-show popup if a brand-new unknown appears after prior dismissal
   const nowHasUnknown = faces.value.some(f => isUnknown(f))
   if (!prevHadUnknown && nowHasUnknown) {
     popupDismissed.value = false

@@ -8,7 +8,7 @@ from speech import process_audio
 
 app = FastAPI()
 
-# 🌐 CORS
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 # =========================
-# 🔐 AUTH DEBUG
+# AUTH DEBUG
 # =========================
 
 
@@ -33,7 +33,7 @@ def me(user=Depends(get_current_user)):
 
 
 # =========================
-# 👤 CREATE PERSON
+# CREATE PERSON
 # =========================
 @app.post("/person")
 def create_person(
@@ -66,7 +66,7 @@ def create_person(
 
 
 # =========================
-# ➕ ADD FACE
+# ADD FACE
 # =========================
 @app.post("/add-face")
 async def add_face(
@@ -90,7 +90,7 @@ async def add_face(
 
 
 # =========================
-# 🎥 RECOGNIZE FACE
+# RECOGNIZE FACE
 # =========================
 
 
@@ -117,7 +117,7 @@ async def recognize(
 
 
 # =========================
-# 🎤 AUDIO → WHISPER
+# WHISPER
 # =========================
 @app.post("/process-interaction")
 async def process_interaction(
@@ -137,8 +137,6 @@ async def process_interaction(
     except Exception as e:
         print(f"Process interaction error: {str(e)}")
         raise HTTPException(500, str(e))
-
-# ✅ Get summary for a person (SAFE)
 
 
 @app.get("/summary/{person_id}")

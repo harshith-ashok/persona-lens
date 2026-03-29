@@ -5,11 +5,10 @@ import ast
 from fastapi import UploadFile
 from db import supabase
 
-# 🔥 CACHE
+
 embedding_cache = {}
 
 
-# ✅ ADD FACE
 async def add_face_logic(file: UploadFile, person_id: str):
     img = await file.read()
     np_img = np.frombuffer(img, np.uint8)
@@ -40,10 +39,9 @@ async def add_face_logic(file: UploadFile, person_id: str):
     return True
 
 
-# ✅ RECOGNIZE
 async def recognize_logic(file: UploadFile, patient_id: str):
     try:
-        # 🔥 CACHE FIRST
+
         if patient_id in embedding_cache:
             known_embeddings, names, person_ids = embedding_cache[patient_id]
         else:
@@ -60,7 +58,6 @@ async def recognize_logic(file: UploadFile, patient_id: str):
 
                 embedding = row["embedding"]
 
-                # 🔥 FIX: string → list
                 if isinstance(embedding, str):
                     embedding = ast.literal_eval(embedding)
 
@@ -72,7 +69,6 @@ async def recognize_logic(file: UploadFile, patient_id: str):
                 known_embeddings, names, person_ids
             )
 
-        # 🔥 Read image
         img = await file.read()
         np_img = np.frombuffer(img, np.uint8)
         image = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
@@ -82,7 +78,6 @@ async def recognize_logic(file: UploadFile, patient_id: str):
 
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # 🔥 Detect faces
         locations = face_recognition.face_locations(rgb)
         encodings = face_recognition.face_encodings(rgb, locations)
 

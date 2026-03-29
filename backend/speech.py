@@ -9,23 +9,19 @@ model = whisper.load_model("base")
 
 async def process_audio(file, patient_id, person_id=None):
     try:
-        # 💾 Save temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tmp.write(await file.read())
             path = tmp.name
 
-        # 🎤 Transcribe
         result = model.transcribe(path)
         transcript = result.get("text", "").strip()
 
-        print("🧠 TRANSCRIPT:", transcript)
+        print("TRANSCRIPT:", transcript)
 
-        # 🧠 Generate summary (ONLY if person exists)
         summary = None
         if person_id and transcript:
             summary = generate_summary(transcript)
 
-        # 🗄️ Save interaction log
         log = supabase.table("interaction_logs").insert({
             "patient_id": patient_id,
             "known_person_id": person_id,
@@ -34,7 +30,6 @@ async def process_audio(file, patient_id, person_id=None):
 
         log_id = log.data[0]["id"]
 
-        # 🧠 Update summaries
         if person_id and summary:
             existing = supabase.table("interaction_summaries") \
                 .select("*") \
