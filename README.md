@@ -67,10 +67,6 @@ npm run dev
 
 `Open http://localhost:5173`
 
-### Demo Video
-
-[![Frontend Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
-
 ---
 
 ## Backend
@@ -174,6 +170,6 @@ M --> G
 
 ## Demo Video
 
-[![Full Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+[![Full Demo](https://img.youtube.com/vi/OSzM6YMrMGI/0.jpg)](https://youtu.be/OSzM6YMrMGI)
 
 ---
