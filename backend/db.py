@@ -1,9 +1,9 @@
 # db.py
 from supabase import create_client, Client
 
-SUPABASE_URL = "https://pffshbkpvbxakvblflzw.supabase.co"
+SUPABASE_URL = "SECRET"
 
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmZnNoYmtwdmJ4YWt2YmxmbHp3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDYwNTIxMiwiZXhwIjoyMDkwMTgxMjEyfQ.Q1fCdxOy-e5jg6g2etOuta6vwgQ3dreKRK7ib_qfuYM"
+SUPABASE_SERVICE_KEY = "SECRET"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
