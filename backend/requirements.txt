@@ -9,4 +9,6 @@ numpy
 assemblyai
 python-dotenv
 requests
-openai-whisper
+openai-whisperpyannote.audio
+soundfile
+scipy==1.13.1
