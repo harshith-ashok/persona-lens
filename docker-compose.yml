@@ -1,0 +1,78 @@
+# Minimal local Supabase: Postgres (+pgvector), Auth (GoTrue), REST (PostgREST), nginx gateway.
+# Generate secrets first:  ./docker/gen-env.sh
+# API URL: http://localhost:8000   (use ANON_KEY in frontend, SERVICE_ROLE_KEY in backend)
+services:
+  db:
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Runs once on first init, after the image's own role/auth setup
+      - ./docker/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ./supabase.sql:/docker-entrypoint-initdb.d/migrations/99-persona-lens.sql:ro
+      - ./migrations/001_sessions.sql:/docker-entrypoint-initdb.d/migrations/99-yy-sessions.sql:ro
+      - ./migrations/002_voice.sql:/docker-entrypoint-initdb.d/migrations/99-yz-voice.sql:ro
+      - ./migrations/003_voice_256.sql:/docker-entrypoint-initdb.d/migrations/99-yza-voice256.sql:ro
+      - ./migrations/004_face_images.sql:/docker-entrypoint-initdb.d/migrations/99-yzb-faceimg.sql:ro
+      - ./migrations/005_async_sessions.sql:/docker-entrypoint-initdb.d/migrations/99-yzc-async.sql:ro
+      - ./migrations/006_session_face.sql:/docker-entrypoint-initdb.d/migrations/99-yzd-sessface.sql:ro
+      - ./migrations/007_memory.sql:/docker-entrypoint-initdb.d/migrations/99-yze-memory.sql:ro
+      - ./migrations/008_gallery.sql:/docker-entrypoint-initdb.d/migrations/99-yzf-gallery.sql:ro
+      - ./migrations/009_host.sql:/docker-entrypoint-initdb.d/migrations/99-yzg-host.sql:ro
+      - ./migrations/010_life_events.sql:/docker-entrypoint-initdb.d/migrations/99-yzh-events.sql:ro
+      - ./docker/grants.sql:/docker-entrypoint-initdb.d/migrations/99-zz-grants.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: supabase/gotrue:v2.158.1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${SITE_URL}
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"   # no SMTP locally; skip email confirmation
+
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+
+  gateway:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on: [auth, rest]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  db-data:
