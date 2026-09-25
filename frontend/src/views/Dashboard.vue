@@ -1,947 +1,467 @@
 <template>
-  <div class="shell">
-    <video ref="video" autoplay playsinline class="video" />
-
-    <div
-      v-for="(face, i) in faces"
-      :key="'box-' + i"
-      class="face-wrap"
-      :style="getWrapStyle(face)"
-    >
-      <div class="face-box" :class="{ unknown: isUnknown(face) }" />
-
-      <div class="face-label" :class="{ unknown: isUnknown(face) }">
-        <span class="face-label-name">
-          {{ isUnknown(face) ? 'Unknown' : face.name }}
-        </span>
-
-        <span v-if="face.confidence" class="face-label-conf">
-          {{ Math.round(face.confidence * 100) }}%
-        </span>
-
-        <span
-          v-if="face.person_id && relations[face.person_id]"
-          class="face-label-relation"
-        >
-          • {{ relations[face.person_id] }}
-        </span>
+  <div class="hud" :class="{ simple }">
+    <div class="viewfinder">
+      <div v-show="!cameraOn && !waveOn" class="idle-plate">
+        <div class="idle-ring">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>
+        </div>
       </div>
-    </div>
+      <video ref="video" autoplay playsinline muted :class="{ hidden: !cameraOn }" />
+      <div v-if="waveOn" class="wave on"><WaveCanvas :analyser="recorder.analyser.value" /></div>
 
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-brand">
-          <span class="brand-dot" :class="{ active: faces.length > 0 }" />
-          <span class="brand-text">PERSONALENS</span>
+      <div class="scrim-top" />
+      <div class="scrim-bottom" />
+      <div class="scan-sweep" :class="{ active: cameraOn && scanning }" />
+      <div class="brackets" aria-hidden="true"><span class="tl" /><span class="tr" /><span class="bl" /><span class="br" /></div>
+
+      <div class="hud-top">
+        <div class="readout" role="status" aria-live="polite">
+          <span class="dot" :class="dotKind" />
+          <span class="val">{{ readout }}</span>
+        </div>
+        <div class="hud-controls">
+          <button class="icon-btn" :class="{ 'id-on': enrolled }" type="button" aria-label="Set up your voice and face" @click="showEnroll = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4" /></svg>
+          </button>
+          <button class="icon-btn" type="button" aria-label="Ask your memory" @click="openMenu('ask')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z" /><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1-1.5 2M12 16.5v.01" /></svg>
+          </button>
+          <button class="icon-btn" type="button" aria-label="Open menu" @click="openMenu('people')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
+          </button>
         </div>
       </div>
 
-      <!-- <div class="statusbar">
-        <span class="status-item">
-          <span class="status-dot" :class="{ live: cameraActive }" />
-          {{ cameraActive ? 'LIVE' : 'OFFLINE' }}
-        </span>
-        <span class="status-divider">|</span>
-        <span class="status-item">
-          {{ faces.length }} FACE{{ faces.length !== 1 ? 'S' : '' }} DETECTED
-        </span>
-      </div> -->
-      
-      <div class="stats-strip">
-        <div class="stat">
-          <div class="stat-num">{{ faces.length }}</div>
-          <div class="stat-label">IN FRAME</div>
-        </div>
-        <div class="stat-div" />
-        <div class="stat">
-          <div class="stat-num">{{ knownCount }}</div>
-          <div class="stat-label">IDENTIFIED</div>
-        </div>
-        <div class="stat-div" />
-        <div class="stat">
-          <div class="stat-num">{{ unknownCount }}</div>
-          <div class="stat-label">UNKNOWN</div>
+      <div v-for="t in tags" :key="t.key" class="face-tag"
+           :class="{ unknown: t.unknown, identifying: t.identifying, self: t.is_self, flip: flips(t) }" :style="styleFor(t)">
+        <div class="box" /><div class="lead" />
+        <div class="label">
+          {{ t.is_self ? 'You' : t.unknown ? (t.identifying ? 'Identifying…' : 'Unmatched') : t.name }}
+          <span class="sub">{{ tagSub(t) }}</span>
         </div>
       </div>
 
-      <div class="sidebar-section-label">DETECTED PEOPLE</div>
-      <div class="face-list">
-        <transition-group name="card">
-          <div
-            v-for="(face, i) in faces"
-            :key="face.person_id || face.name + i"
-            class="face-card"
-            :class="{ unknown: isUnknown(face) }"
-          >
-            <div class="card-top">
-              <div class="avatar" :class="avatarColor(face.name)">
-                {{ (face.name || '?')[0].toUpperCase() }}
-              </div>
-              <div class="card-meta">
-                <div class="card-name">
-                  {{ isUnknown(face) ? 'Unidentified' : face.name }}
-                </div>
-                <div class="card-conf" v-if="face.confidence">
-                  {{ Math.round(face.confidence * 100) }}% match
-                </div>
-              </div>
-              <div class="card-badge" :class="isUnknown(face) ? 'badge-warn' : 'badge-ok'">
-                {{ isUnknown(face) ? 'NEW' : 'ID' }}
-              </div>
-            </div>
-
-            <div
-              v-if="face.person_id && summaries[face.person_id]"
-              class="card-summary"
-            >
-              <div v-if="summaries[face.person_id].first_summary" class="summary-row">
-                <span class="summary-tag">FIRST</span>
-                <span class="summary-text">{{ summaries[face.person_id].first_summary }}</span>
-              </div>
-              <div v-if="summaries[face.person_id].last_summary" class="summary-row">
-                <span class="summary-tag">LAST</span>
-                <span class="summary-text">{{ summaries[face.person_id].last_summary }}</span>
-              </div>
-            </div>
-          </div>
-        </transition-group>
-
-        <div v-if="faces.length === 0" class="empty-state">
-          <div class="empty-icon">◎</div>
-          <div class="empty-text">No faces in frame</div>
+      <div class="captions" aria-live="polite">
+        <div v-for="l in captions.lines.value" :key="l.id" class="cap-line" :class="l.speaker === 'host' ? 'host' : 'other'">
+          <span class="tag" aria-hidden="true" /><span>{{ l.text }}</span>
+        </div>
+        <div v-if="captions.partial.value" class="cap-line partial" :class="{ 'is-last': true }">
+          <span class="tag" aria-hidden="true" /><span>{{ captions.partial.value }}</span>
         </div>
       </div>
 
-      <div class="mic-section">
-        <div class="sidebar-section-label" style="padding: 0 0 8px;">INTERACTION LOG</div>
-        <button
-          class="mic-btn"
-          :class="{ recording: isRecording }"
-          @click="isRecording ? stopRecording() : startRecording()"
-        >
-          <span class="mic-icon">{{ isRecording ? '⏹' : '⏺' }}</span>
-          {{ isRecording ? 'Stop Recording' : 'Start Recording' }}
+      <RecallCard :people="recallPeople" />
+
+      <button v-if="simple" class="simple-exit" type="button"
+              @pointerdown="holdStart" @pointerup="holdCancel" @pointerleave="holdCancel">Hold to exit</button>
+
+      <div class="dock">
+        <div class="mode-pill" role="tablist" aria-label="Session mode">
+          <button type="button" role="tab" :class="{ active: mode === 'vision' }" :aria-selected="mode === 'vision'"
+                  aria-label="Vision and voice" :disabled="busy" @click="mode = 'vision'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+          </button>
+          <button type="button" role="tab" :class="{ active: mode === 'audio' }" :aria-selected="mode === 'audio'"
+                  aria-label="Voice only" :disabled="busy" @click="mode = 'audio'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4" /></svg>
+          </button>
+        </div>
+        <div v-if="simple" class="simple-hint">{{ phase === 'recording' ? 'Tap to stop' : phase === 'idle' ? 'Tap to start' : 'Please wait…' }}</div>
+        <button class="rec-ring" :class="{ recording: phase === 'recording' }" type="button"
+                :aria-label="phase === 'recording' ? 'Stop recording' : 'Start recording'"
+                :disabled="phase === 'processing' || phase === 'starting'" @click="phase === 'recording' ? endSession() : startSession()">
+          <span class="core" />
         </button>
-        <div v-if="transcript" class="log-block">
-          <div class="log-tag">TRANSCRIPT</div>
-          <p class="log-text">{{ transcript }}</p>
-        </div>
-        <div v-if="summary" class="log-block">
-          <div class="log-tag">SUMMARY</div>
-          <p class="log-text">{{ summary }}</p>
-        </div>
       </div>
-    </aside>
-
-    <div class="statusbar">
-      <span class="status-item">
-        <span class="status-dot" :class="{ live: cameraActive }" />
-        {{ cameraActive ? 'LIVE' : 'OFFLINE' }}
-      </span>
-      <span class="status-divider">|</span>
-      <span class="status-item">
-        {{ faces.length }} FACE{{ faces.length !== 1 ? 'S' : '' }} DETECTED
-      </span>
     </div>
 
-    <transition name="popup">
-      <div v-if="hasUnknown" class="add-popup">
-        <div class="add-popup-header">
-          <span class="add-popup-indicator" />
-          <span class="add-popup-title">New Face Detected</span>
-          <button class="add-popup-close" @click="dismissPopup">✕</button>
-        </div>
-        <p class="add-popup-hint">
-          {{ unknownCount }} unidentified person{{ unknownCount !== 1 ? 's' : '' }} in frame.
-          Enter a name to register them.
-        </p>
-        <div class="add-popup-row">
-          <input
-            v-model="name"
-            placeholder="Enter name…"
-            class="add-input"
-            @keyup.enter="addFace"
-          />
-          <button class="add-btn" @click="addFace">ADD</button>
+    <SessionCard v-if="card" :result="card" @close="card = null" @name="naming = { sessionId: card.session_id, faceBlob }" />
+    <NamePrompt v-if="naming" :session-id="naming.sessionId" :face-blob="naming.faceBlob" :face-b64="naming.faceB64"
+                :people="people" @saved="onNamed" @skip="naming = null" />
+
+    <div v-if="showEnroll" class="overlay open" role="dialog" aria-modal="true" aria-labelledby="enroll-title"
+         @click.self="setupComplete && (showEnroll = false)">
+      <div class="modal tall">
+        <div class="m-kicker">One-time setup</div>
+        <h2 id="enroll-title">Set up you</h2>
+        <HostSetup :host="host" skippable @changed="refreshHost" @done="showEnroll = false" @skip="skipEnroll" />
+      </div>
+    </div>
+
+    <MenuDrawer :open="menuOpen" :initial-tab="menuTab" :people="people" :history="history" :host="host"
+                :simple="simple" @update:simple="setSimple" :save-video="saveVideo" @update:save-video="setSaveVideo"
+                @watch-video="watchVideo"
+                @close="menuOpen = false" @host-changed="refreshHost" @name-session="nameFromHistory" />
+    <div v-if="videoView" class="overlay open" role="dialog" aria-modal="true" @click.self="closeVideo">
+      <div class="modal tall">
+        <div class="m-kicker">Recorded conversation</div>
+        <video :src="videoView.url" controls autoplay playsinline class="watch" />
+        <div class="modal-actions">
+          <button class="btn ghost" type="button" @click="deleteVideo">Delete video</button>
+          <button class="btn primary" type="button" @click="closeVideo">Close</button>
         </div>
       </div>
-    </transition>
+    </div>
+
+    <ToastStack />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import axios from 'axios'
-import { createClient } from '@supabase/supabase-js'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '@/lib/supabase'
+import { api } from '@/lib/api'
+import { useAudioRecorder } from '@/composables/useAudioRecorder'
+import { useSilenceDetector } from '@/composables/useSilenceDetector'
+import { useFaceTags } from '@/composables/useFaceTags'
+import { useLiveCaptions } from '@/composables/useLiveCaptions'
+import { toast } from '@/composables/useToast'
+import WaveCanvas from '@/components/WaveCanvas.vue'
+import SessionCard from '@/components/SessionCard.vue'
+import NamePrompt from '@/components/NamePrompt.vue'
+import HostSetup from '@/components/HostSetup.vue'
+import MenuDrawer from '@/components/MenuDrawer.vue'
+import ToastStack from '@/components/ToastStack.vue'
+import RecallCard from '@/components/RecallCard.vue'
+import '@/assets/hud.css'
 
-const SUPABASE_URL = 'https://pffshbkpvbxakvblflzw.supabase.co'
-const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmZnNoYmtwdmJ4YWt2YmxmbHp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MDUyMTIsImV4cCI6MjA5MDE4MTIxMn0.4rUiGa7rBz7dwloK6nXHqKx2_2nJj1lQpGM7PZQXMLY'
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+const SILENCE_SECONDS = 15
+const SIMPLE_KEY = 'pl_simple'
+const VIDEO_KEY = 'pl_save_video'
+const RECALL_SECONDS = 20   // how long a recall card stays after the person was last seen/heard
+const HOLD_MS = 1200
+const ENROLL_SKIP_KEY = 'pl_enroll_skipped'
 
-const API = 'http://localhost:8120'
+const router = useRouter()
+const video = ref(null)
 
-// ── Refs ──────────────────────────────────────────────
-const video          = ref(null)
-const faces          = ref([])
-const trackedFaces   = ref({})
-const summaries      = ref({})
-const relations      = ref({})
-const name           = ref('')
-const isRecording    = ref(false)
-const mediaRecorder  = ref(null)
-const audioChunks    = ref([])
-const transcript     = ref('')
-const summary        = ref('')
-const currentTime    = ref('')
-const cameraActive   = ref(false)
-const popupDismissed = ref(false)
+const mode = ref('vision')          // vision | audio (locked while a session is running)
+const phase = ref('idle')           // idle | starting | recording | processing
+const activeMode = ref('vision')    // mode of the session in progress / just ended
+const busy = computed(() => phase.value !== 'idle')
 
-let isProcessing  = false
-let clockInterval = null
+const recorder = useAudioRecorder()
+const { tags, scanning, recognized, sawUnknown, styleFor, flips, start: startTags, stop: stopTags, captureFull } = useFaceTags(video)
+const captions = useLiveCaptions()
+const silence = useSilenceDetector({ silenceMs: SILENCE_SECONDS * 1000, onSilence: () => endSession() })
 
-// ── Computed ───────────────────────────────────────────
-const knownCount   = computed(() => faces.value.filter(f => !isUnknown(f)).length)
-const unknownCount = computed(() => faces.value.filter(f => isUnknown(f)).length)
-const hasUnknown   = computed(() => unknownCount.value > 0 && !popupDismissed.value)
+const cameraOn = computed(() => phase.value === 'recording' && activeMode.value === 'vision')
+const waveOn = computed(() => phase.value === 'recording' && activeMode.value === 'audio')
 
-// ── Clock ──────────────────────────────────────────────
-function updateClock() {
-  currentTime.value = new Date().toLocaleTimeString('en-US', {
-    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+let stream = null
+let sessionId = null
+
+const card = ref(null)
+const naming = ref(null)   // { sessionId, faceBlob?, faceB64? } while the name prompt is open
+const faceBlob = ref(null)
+
+const people = ref([])
+const history = ref([])
+const host = ref(null)          // GET /host: username, voice/face status, photo (same on every device)
+const enrolled = computed(() => !!host.value?.voice_enrolled)
+const setupComplete = computed(() => !!host.value?.voice_enrolled && !!host.value?.face_enrolled)
+const showEnroll = ref(false)
+const menuOpen = ref(false)
+const menuTab = ref('people')
+
+// ── Big & simple mode (remembered on this device) ──
+function readSimple() {
+  try { return localStorage.getItem(SIMPLE_KEY) === '1' } catch (e) { return false }
+}
+const simple = ref(readSimple())
+function setSimple(on) {
+  simple.value = on
+  try { localStorage.setItem(SIMPLE_KEY, on ? '1' : '0') } catch (e) { /* storage unavailable */ }
+  if (on) menuOpen.value = false
+}
+// ── Save video of vision sessions (opt-in, remembered on this device) ──
+const saveVideo = ref((() => { try { return localStorage.getItem(VIDEO_KEY) === '1' } catch (e) { return false } })())
+function setSaveVideo(on) {
+  saveVideo.value = on
+  try { localStorage.setItem(VIDEO_KEY, on ? '1' : '0') } catch (e) { /* storage unavailable */ }
+}
+
+let videoRec = null
+let videoChunks = []
+function startVideo() {
+  if (activeMode.value !== 'vision' || !saveVideo.value || !window.MediaRecorder) return
+  try {
+    videoChunks = []
+    videoRec = new MediaRecorder(stream, { videoBitsPerSecond: 800000 })
+    videoRec.ondataavailable = (e) => e.data.size && videoChunks.push(e.data)
+    videoRec.start(1000)
+  } catch (e) {
+    videoRec = null
+  }
+}
+function stopVideo() {
+  return new Promise((resolve) => {
+    if (!videoRec || videoRec.state === 'inactive') return resolve(null)
+    videoRec.onstop = () => { resolve(new Blob(videoChunks, { type: videoRec.mimeType || 'video/webm' })); videoRec = null }
+    videoRec.stop()
   })
 }
 
-// ── Auth ───────────────────────────────────────────────
-async function getToken() {
-  const { data } = await supabase.auth.getSession()
-  return data?.session?.access_token || null
+// Watch a saved video (fetched with the login, so it stays private)
+const videoView = ref(null)
+async function watchVideo(session) {
+  try {
+    const { data } = await api.get(`/session/${session.id}/video`, { responseType: 'blob' })
+    menuOpen.value = false
+    videoView.value = { id: session.id, url: URL.createObjectURL(data) }
+  } catch (e) {
+    toast('Could not open that video')
+  }
+}
+function closeVideo() {
+  if (videoView.value) URL.revokeObjectURL(videoView.value.url)
+  videoView.value = null
+}
+async function deleteVideo() {
+  const id = videoView.value?.id
+  closeVideo()
+  try { await api.delete(`/session/${id}/video`); toast('Video deleted'); refreshLists() } catch (e) { toast('Could not delete the video') }
 }
 
-// ── Lifecycle ──────────────────────────────────────────
-onMounted(async () => {
-  await nextTick()
-  updateClock()
-  clockInterval = setInterval(updateClock, 1000)
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-    video.value.srcObject = stream
-    video.value.onloadedmetadata = () => {
-      video.value.play()
-      cameraActive.value = true
-      startLoop()
-    }
-  } catch (e) {
-    console.error('Camera error:', e)
-  }
+let holdTimer = null
+const holdStart = () => { holdTimer = setTimeout(() => setSimple(false), HOLD_MS) }
+const holdCancel = () => clearTimeout(holdTimer)
+
+// ── Recall cards: who is here right now, and what we last talked about ──
+const seenAt = ref({})     // person_id -> last time seen (face) or heard (voice), ms
+const clockTick = ref(Date.now())
+let tickTimer = null
+
+function touchPerson(id) {
+  if (!id) return
+  seenAt.value = { ...seenAt.value, [id]: Date.now() }
+  if (!people.value.some((p) => p.id === id)) refreshLists()   // someone new since the list loaded
+}
+
+watch(tags, (list) => list.forEach((t) => !t.unknown && !t.is_self && touchPerson(t.person_id)))
+watch(() => captions.lines.value, (list) => list.forEach((l) => touchPerson(l.person_id)))
+watch(recognized, (r) => r && touchPerson(r.person_id))
+
+const recallPeople = computed(() => {
+  if (phase.value !== 'recording') return []
+  return Object.entries(seenAt.value)
+    .filter(([, t]) => clockTick.value - t < RECALL_SECONDS * 1000)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => people.value.find((p) => p.id === id))
+    .filter(Boolean)
+    .slice(0, 2)
 })
 
-onUnmounted(() => clearInterval(clockInterval))
-
-// ── Frame capture ──────────────────────────────────────
-function captureFrame() {
-  if (!video.value || video.value.videoWidth === 0) return null
-  const canvas = document.createElement('canvas')
-  canvas.width  = 320
-  canvas.height = 240
-  canvas.getContext('2d').drawImage(video.value, 0, 0, 320, 240)
-  return new Promise((resolve) =>
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
-  )
+function tagSub(t) {
+  if (t.is_self) return t.name
+  if (t.identifying) return t.unknown ? 'Checking…' : `${Math.round(t.confidence * 100)}% · verifying`
+  return t.unknown ? 'No match' : `${Math.round(t.confidence * 100)}% match`
 }
 
-// ── Recognition ────────────────────────────────────────
-async function recognizeFrame() {
-  const token = await getToken()
-  if (!token) return
+// ── Status readout ────────────────────────────────────
+const clock = computed(() => {
+  const s = recorder.seconds.value
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+})
 
-  const blob = await captureFrame()
-  if (!blob) return
-
-  const formData = new FormData()
-  formData.append('file', blob)
-
-  const res = await axios.post(`${API}/recognize`, formData, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-
-  const rect   = video.value.getBoundingClientRect()
-  const scaleX = rect.width  / 320
-  const scaleY = rect.height / 240
-
-  const prevHadUnknown = faces.value.some(f => isUnknown(f))
-
-  faces.value = res.data.map((face) => {
-    const id = face.person_id || face.name
-
-    if (trackedFaces.value[id]) {
-      const prev = trackedFaces.value[id]
-      face.location = face.location.map((v, i) => prev[i] * 0.7 + v * 0.3)
+const readout = computed(() => {
+  if (phase.value === 'processing') return 'Processing…'
+  if (phase.value === 'recording') {
+    let label
+    if (activeMode.value === 'audio') {
+      label = silence.silentFor.value >= 5
+        ? `Silence · ending in ${SILENCE_SECONDS - silence.silentFor.value}s`
+        : 'Listening'
+    } else {
+      label = recognized.value ? `${recognized.value.name.split(' ')[0]} matched` : 'Scanning'
     }
-
-    trackedFaces.value[id] = face.location
-    
-    if (face.person_id) {
-      fetchSummary(face.person_id)
-      fetchRelation(face.person_id) // ✅ NEW
-    }
-
-    return {
-      ...face,
-      location: [
-        face.location[0] * scaleY,  // top
-        face.location[1] * scaleX,  // right
-        face.location[2] * scaleY,  // bottom
-        face.location[3] * scaleX,  // left
-      ],
-    }
-  })
-
-  const nowHasUnknown = faces.value.some(f => isUnknown(f))
-  if (!prevHadUnknown && nowHasUnknown) {
-    popupDismissed.value = false
+    return `Rec ${clock.value} · ${label}`
   }
-}
+  return mode.value === 'vision' ? 'Standby' : 'Standby · voice only'
+})
 
-function startLoop() {
-  async function loop() {
-    if (!isProcessing) {
-      isProcessing = true
-      await recognizeFrame()
-      isProcessing = false
-    }
-    requestAnimationFrame(loop)
+const dotKind = computed(() => {
+  if (phase.value === 'recording') return recognized.value ? 'match' : 'live'
+  return phase.value === 'processing' ? 'ok' : ''
+})
+
+// ── Session lifecycle ─────────────────────────────────
+async function startSession() {
+  if (phase.value !== 'idle') return
+  phase.value = 'starting'
+  seenAt.value = {}
+  card.value = null
+  activeMode.value = mode.value
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(
+      mode.value === 'vision' ? { video: { facingMode: 'user' }, audio: true } : { audio: true },
+    )
+  } catch (e) {
+    phase.value = 'idle'
+    toast(mode.value === 'vision' ? 'Camera or mic blocked' : 'Mic blocked')
+    return
   }
-  loop()
-}
-
-// ── Summaries ──────────────────────────────────────────
-async function fetchSummary(person_id) {
-  if (summaries.value[person_id]) return
-  const token = await getToken()
-  if (!token) return
-  const res = await axios.get(`${API}/summary/${person_id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  summaries.value[person_id] = res.data
-}
-
-// ── Relation (NEW) ─────────────────────────────────────
-async function fetchRelation(person_id) {
-  if (relations.value[person_id]) return
-
-  const token = await getToken()
-  if (!token) return
 
   try {
-    const res = await axios.get(`${API}/relation/${person_id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-
-    let relation = null
-
-    if (typeof res.data?.relation === 'string') {
-      relation = res.data.relation
-    } else if (res.data?.relation?.data?.length) {
-      relation = res.data.relation.data[0].relationship
-    }
-
-    relations.value[person_id] = relation || 'unknown'
+    const fd = new FormData()
+    fd.append('mode', mode.value)
+    sessionId = (await api.post('/session/start', fd)).data.id
+    await recorder.start(stream)
   } catch (e) {
-    console.error('Relation fetch error:', e)
-    relations.value[person_id] = 'unknown'
+    releaseStream()
+    phase.value = 'idle'
+    toast(e.response?.data?.detail || 'Could not start session')
+    return
+  }
+
+  phase.value = 'recording'
+  startVideo()
+  captions.start(stream, sessionId) // best-effort; the recording below is what gets processed
+  if (activeMode.value === 'vision') {
+    await nextTick()
+    video.value.srcObject = stream
+    video.value.onloadedmetadata = () => startTags()
+  } else {
+    silence.start(stream)
   }
 }
 
-// ── Style helpers ──────────────────────────────────────
-function getWrapStyle(face) {
-  const [top, right, bottom, left] = face.location || [0, 0, 0, 0]
-  return {
-    top:    `${top}px`,
-    left:   `${left}px`,
-    width:  `${right - left}px`,
-    height: `${bottom - top}px`,
+async function endSession() {
+  if (phase.value !== 'recording') return
+  phase.value = 'processing'
+  silence.stop()
+  captions.stop()
+
+  const person = recognized.value
+  const unknownFace = sawUnknown.value
+  faceBlob.value = activeMode.value === 'vision' ? await captureFull() : null
+  stopTags()
+
+  const audio = await recorder.stop()
+  const video = await stopVideo()
+  releaseStream()
+
+  try {
+    const fd = new FormData()
+    fd.append('audio', audio, 'session.webm')
+    if (person) fd.append('person_id', person.person_id)
+    if (faceBlob.value) fd.append('face_image', faceBlob.value, 'face.jpg')  // kept so they can be named later
+    if (video) fd.append('video', video, 'session.webm')
+    await api.post(`/session/${sessionId}/end`, fd)
+    const data = await waitForResult(sessionId)
+
+    // someone worth naming: an unmatched voice, an unmatched face, or (diarization unavailable) any speech
+    const otherSpeaker = data.other_speaker_detected ?? !!data.transcript
+    const needsName = !data.person_id && (otherSpeaker || (activeMode.value === 'vision' && unknownFace))
+
+    card.value = { ...data, needs_naming: needsName, mode: activeMode.value, durationSec: data.durationSec ?? recorder.seconds.value }
+    if (needsName) setTimeout(() => (naming.value = { sessionId: data.session_id, faceBlob: faceBlob.value }), 500)
+    refreshLists()
+  } catch (e) {
+    toast(e.response?.data?.detail || e.message || 'Session failed to save')
+  } finally {
+    phase.value = 'idle'
   }
 }
 
-function isUnknown(face) {
-  return face.name === 'Unknown' || (face.confidence !== undefined && face.confidence < 0.6)
+// The backend processes a session in the background; poll until it finishes.
+const POLL_MS = 1000
+const POLL_TIMEOUT_MS = 5 * 60 * 1000
+
+async function waitForResult(id) {
+  const deadline = Date.now() + POLL_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const { data } = await api.get(`/session/${id}`)
+    if (data.status === 'failed') throw new Error(data.error || 'Processing failed')
+    if (data.status === 'ended' || data.status === 'resolved') return data
+    await new Promise((r) => setTimeout(r, POLL_MS))
+  }
+  throw new Error('Processing timed out')
 }
 
-function dismissPopup() {
-  popupDismissed.value = true
+function releaseStream() {
+  stream?.getTracks().forEach((t) => t.stop())
+  stream = null
+  if (video.value) video.value.srcObject = null
 }
 
-const AVATAR_COLORS = ['av-indigo', 'av-teal', 'av-rose', 'av-amber', 'av-sky']
-function avatarColor(n) {
-  if (!n || n === 'Unknown') return 'av-red'
-  return AVATAR_COLORS[n.charCodeAt(0) % AVATAR_COLORS.length]
+// Name someone from a past, unnamed session (History tab)
+async function nameFromHistory(session) {
+  try {
+    const { data } = await api.get(`/session/${session.id}`, { params: { include_face: true } })
+    menuOpen.value = false
+    naming.value = { sessionId: session.id, faceB64: data.face_image_b64 || '' }
+  } catch (e) {
+    toast('Could not open that session')
+  }
 }
 
-// ── Recording ──────────────────────────────────────────
-async function startRecording() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  mediaRecorder.value = new MediaRecorder(stream)
-  audioChunks.value   = []
-  mediaRecorder.value.ondataavailable = (e) => audioChunks.value.push(e.data)
-  mediaRecorder.value.onstop = sendAudio
-  mediaRecorder.value.start()
-  isRecording.value = true
+function onNamed({ person, session_id: savedId }) {
+  naming.value = null
+  if (card.value?.session_id === savedId) {
+    card.value = { ...card.value, person_name: person.name, person_id: person.id, needs_naming: false }
+  }
+  toast(`Saved ${person.name}`)
+  refreshLists()
 }
 
-function stopRecording() {
-  mediaRecorder.value.stop()
-  isRecording.value = false
+// ── Voice enrollment ──────────────────────────────────
+async function refreshHost() {
+  try { host.value = (await api.get('/host')).data } catch (e) { /* offline */ }
 }
 
-async function sendAudio() {
-  const blob  = new Blob(audioChunks.value, { type: 'audio/webm' })
-  const token = await getToken()
-  const formData = new FormData()
-  formData.append('audio', blob)
-  const knownFace = faces.value.find((f) => f.person_id)
-  if (knownFace) formData.append('person_id', knownFace.person_id)
-  const res = await axios.post(`${API}/process-interaction`, formData, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  transcript.value = res.data.transcript
-  summary.value    = res.data.summary
+function skipEnroll() {
+  showEnroll.value = false
+  try { localStorage.setItem(ENROLL_SKIP_KEY, '1') } catch (e) { /* storage unavailable */ }
 }
 
-// ── Add face ───────────────────────────────────────────
-async function addFace() {
-  if (!name.value.trim()) return
-  const token = await getToken()
-  if (!token) return
-
-  const fd = new FormData()
-  fd.append('name', name.value)
-  const personRes = await axios.post(`${API}/person`, fd, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const personId = personRes.data.id
-
-  const canvas = document.createElement('canvas')
-  canvas.width  = video.value.videoWidth
-  canvas.height = video.value.videoHeight
-  canvas.getContext('2d').drawImage(video.value, 0, 0)
-
-  canvas.toBlob(async (blob) => {
-    const fd2 = new FormData()
-    fd2.append('file', blob)
-    fd2.append('person_id', personId)
-    await axios.post(`${API}/add-face`, fd2, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    name.value = ''
-    popupDismissed.value = true
-  }, 'image/jpeg')
+// ── Menu / data ───────────────────────────────────────
+function openMenu(tab) {
+  menuTab.value = tab
+  menuOpen.value = true
+  refreshLists()
 }
+
+async function refreshLists() {
+  try {
+    const [p, h] = await Promise.all([api.get('/people'), api.get('/sessions')])
+    people.value = p.data
+    history.value = h.data
+  } catch (e) {
+    console.error('Failed to load people/history', e)
+  }
+}
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (naming.value) naming.value = null
+  else if (showEnroll.value && setupComplete.value) showEnroll.value = false
+  else if (menuOpen.value) menuOpen.value = false
+}
+
+onMounted(async () => {
+  const { data } = await supabase.auth.getSession()
+  if (!data.session) return router.replace('/login')
+
+  window.addEventListener('keydown', onKeydown)
+  tickTimer = setInterval(() => (clockTick.value = Date.now()), 1000)
+  refreshLists()
+
+  await refreshHost()
+  let skipped = false
+  try { skipped = localStorage.getItem(ENROLL_SKIP_KEY) === '1' } catch (e) { /* storage unavailable */ }
+  if (!setupComplete.value && !skipped) setTimeout(() => (showEnroll.value = true), 500)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  clearInterval(tickTimer)
+  clearTimeout(holdTimer)
+  silence.stop()
+  captions.stop()
+  stopTags()
+  recorder.release()
+  releaseStream()
+})
 </script>
-
-<style scoped>
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;500;600;700&display=swap');
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* ── Shell ──────────────────────────────────────────── */
-.shell {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-  background: #f0ede8;
-  font-family: 'DM Mono', monospace;
-  overflow: hidden;
-}
-
-/* ── Video ──────────────────────────────────────────── */
-.video {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: calc(100% - 270px);
-  height: 100%;
-  object-fit: cover;
-}
-
-/* ── Face wrapper ────────────────────────────────────── */
-.face-wrap {
-  position: absolute;
-  pointer-events: none;
-}
-
-/* ── Bounding box ────────────────────────────────────── */
-.face-box {
-  position: absolute;
-  inset: 0;
-  border: 2px solid rgba(37, 99, 235, 0.8);
-  border-radius: 4px;
-  background: rgba(37, 99, 235, 0.05);
-}
-.face-box.unknown {
-  border-color: rgba(220, 38, 38, 0.8);
-  background: rgba(220, 38, 38, 0.04);
-}
-
-/* ── Inline label below the box ──────────────────────── */
-.face-label {
-  position: absolute;
-  top: calc(100% + 5px);
-  left: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  border-radius: 4px;
-  padding: 3px 9px;
-  white-space: nowrap;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
-.face-label.unknown {
-  border-color: rgba(220, 38, 38, 0.22);
-}
-.face-label-name {
-  font-family: 'Syne', sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  color: #1e3a8a;
-  letter-spacing: 0.02em;
-}
-.face-label.unknown .face-label-name { color: #991b1b; }
-.face-label-conf {
-  font-size: 10px;
-  color: #94a3b8;
-  font-family: 'DM Mono', monospace;
-}
-.face-label-relation {
-  color: #64748b;
-  font-size: 10px;
-}
-
-/* ── Status bar ──────────────────────────────────────── */
-.statusbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: calc(100% - 270px);
-  height: 38px;
-  background: rgba(255, 255, 255, 0.9);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  z-index: 10;
-}
-
-.status-item {
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #cbd5e1;
-  transition: background 0.3s;
-}
-.status-dot.live {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
-  animation: livepulse 2s ease-in-out infinite;
-}
-@keyframes livepulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(34,197,94,0.18); }
-  50%       { box-shadow: 0 0 0 6px rgba(34,197,94,0.06); }
-}
-
-.status-divider { color: #e2e8f0; font-size: 14px; }
-
-/* ── Sidebar ──────────────────────────────────────────── */
-.sidebar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 270px;
-  height: 100%;
-  background: #ffffff;
-  border-left: 1px solid #e8e3dc;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  z-index: 20;
-  box-shadow: -2px 0 20px rgba(0,0,0,0.05);
-}
-
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 15px 16px 12px;
-  border-bottom: 1px solid #f1ede7;
-}
-
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #cbd5e1;
-  transition: background 0.4s;
-}
-.brand-dot.active {
-  background: #22c55e;
-  animation: livepulse 2s ease-in-out infinite;
-}
-
-.brand-text {
-  font-family: 'Syne', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: 0.14em;
-}
-
-.sidebar-time {
-  font-size: 10px;
-  color: #94a3b8;
-  letter-spacing: 0.06em;
-}
-
-/* ── Stats strip ─────────────────────────────────────── */
-.stats-strip {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid #f1ede7;
-  background: #faf8f5;
-}
-
-.stat {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.stat-num {
-  font-family: 'Syne', sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  color: #0f172a;
-  line-height: 1;
-}
-
-.stat-label {
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  color: #94a3b8;
-}
-
-.stat-div {
-  width: 1px;
-  height: 28px;
-  background: #e8e3dc;
-}
-
-/* ── Section label ───────────────────────────────────── */
-.sidebar-section-label {
-  font-size: 8px;
-  letter-spacing: 0.18em;
-  color: #94a3b8;
-  padding: 12px 16px 6px;
-}
-
-/* ── Face list ───────────────────────────────────────── */
-.face-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 10px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  scrollbar-width: thin;
-  scrollbar-color: #e8e3dc transparent;
-}
-
-/* ── Face card ───────────────────────────────────────── */
-.face-card {
-  background: #faf8f5;
-  border: 1px solid #e8e3dc;
-  border-radius: 10px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: box-shadow 0.2s;
-}
-.face-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
-.face-card.unknown {
-  border-color: rgba(220,38,38,0.18);
-  background: #fff8f8;
-}
-
-.card-top {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-/* ── Avatar ──────────────────────────────────────────── */
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Syne', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.av-indigo { background: #ede9fe; color: #4338ca; }
-.av-teal   { background: #ccfbf1; color: #0d9488; }
-.av-rose   { background: #ffe4e6; color: #e11d48; }
-.av-amber  { background: #fef3c7; color: #d97706; }
-.av-sky    { background: #e0f2fe; color: #0284c7; }
-.av-red    { background: #fee2e2; color: #dc2626; }
-
-.card-meta { flex: 1; min-width: 0; }
-.card-name {
-  font-family: 'Syne', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.card-conf { font-size: 10px; color: #94a3b8; margin-top: 2px; }
-
-/* ── Badge ───────────────────────────────────────────── */
-.card-badge {
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  padding: 2px 7px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-.badge-ok   { background: #dcfce7; color: #15803d; }
-.badge-warn { background: #fee2e2; color: #dc2626; }
-
-/* ── Card summary ────────────────────────────────────── */
-.card-summary {
-  border-top: 1px solid #f1ede7;
-  padding-top: 7px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.summary-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-.summary-tag {
-  font-size: 8px;
-  letter-spacing: 0.1em;
-  color: #cbd5e1;
-  flex-shrink: 0;
-  padding-top: 1px;
-  min-width: 28px;
-}
-.summary-text { font-size: 10px; color: #64748b; line-height: 1.5; }
-
-/* ── Empty state ─────────────────────────────────────── */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 40px 0;
-}
-.empty-icon { font-size: 26px; color: #e2e8f0; }
-.empty-text { font-size: 11px; color: #cbd5e1; letter-spacing: 0.08em; }
-
-/* ── Card list transitions ───────────────────────────── */
-.card-enter-active { transition: all 0.22s ease; }
-.card-leave-active { transition: all 0.18s ease; }
-.card-enter-from   { opacity: 0; transform: translateX(10px); }
-.card-leave-to     { opacity: 0; transform: translateX(10px); }
-
-/* ── Mic section ─────────────────────────────────────── */
-.mic-section {
-  border-top: 1px solid #f1ede7;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: #faf8f5;
-}
-
-.mic-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: #fff;
-  border: 1px solid #e2ddd6;
-  border-radius: 8px;
-  color: #475569;
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  padding: 9px 14px;
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-}
-.mic-btn:hover { border-color: #c4bdb4; background: #f5f2ee; }
-.mic-btn.recording {
-  background: #fff5f5;
-  border-color: rgba(220,38,38,0.3);
-  color: #dc2626;
-  animation: rec-pulse 1.5s ease-in-out infinite;
-}
-@keyframes rec-pulse {
-  0%, 100% { border-color: rgba(220,38,38,0.3); }
-  50%       { border-color: rgba(220,38,38,0.1); }
-}
-.mic-icon { font-size: 13px; }
-
-.log-block {
-  background: #fff;
-  border: 1px solid #ece7e0;
-  border-radius: 6px;
-  padding: 8px 10px;
-}
-.log-tag {
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  color: #94a3b8;
-  margin-bottom: 4px;
-}
-.log-text { font-size: 10px; color: #475569; line-height: 1.6; }
-
-/* ── ADD FACE POPUP — bottom-left, floating ──────────── */
-.add-popup {
-  position: absolute;
-  bottom: 24px;
-  left: 24px;
-  width: 308px;
-  background: #ffffff;
-  border: 1px solid #e2ddd6;
-  border-radius: 16px;
-  padding: 18px;
-  box-shadow:
-    0 4px 6px rgba(0,0,0,0.04),
-    0 12px 40px rgba(0,0,0,0.10);
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.add-popup-header {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.add-popup-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #dc2626;
-  flex-shrink: 0;
-  animation: livepulse 1.4s ease-in-out infinite;
-}
-
-.add-popup-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-  flex: 1;
-}
-
-.add-popup-close {
-  background: none;
-  border: none;
-  font-size: 11px;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 3px 5px;
-  border-radius: 4px;
-  line-height: 1;
-  transition: color 0.15s, background 0.15s;
-}
-.add-popup-close:hover { color: #475569; background: #f1ede7; }
-
-.add-popup-hint {
-  font-size: 11px;
-  color: #64748b;
-  line-height: 1.55;
-}
-
-.add-popup-row {
-  display: flex;
-  gap: 8px;
-}
-
-.add-input {
-  flex: 1;
-  background: #faf8f5;
-  border: 1px solid #e2ddd6;
-  border-radius: 8px;
-  color: #0f172a;
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  padding: 9px 12px;
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.add-input::placeholder { color: #cbd5e1; }
-.add-input:focus {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 3px rgba(147,197,253,0.25);
-}
-
-.add-btn {
-  background: #0f172a;
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  padding: 9px 16px;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.1s;
-  white-space: nowrap;
-}
-.add-btn:hover { background: #1e293b; }
-.add-btn:active { transform: scale(0.97); }
-
-/* ── Popup transition ────────────────────────────────── */
-.popup-enter-active { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.popup-leave-active { transition: all 0.2s ease; }
-.popup-enter-from   { opacity: 0; transform: translateY(20px) scale(0.95); }
-.popup-leave-to     { opacity: 0; transform: translateY(10px) scale(0.97); }
-</style>

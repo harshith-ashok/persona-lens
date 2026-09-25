@@ -41,20 +41,20 @@
 
       <!-- Form -->
       <div class="form">
-        <!-- Email -->
-        <div class="field" :class="{ focused: focusedField === 'email', filled: email }">
-          <label>Email address</label>
+        <!-- Username -->
+        <div class="field" :class="{ focused: focusedField === 'username', filled: username }">
+          <label>Username</label>
           <div class="input-wrap">
             <svg class="field-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.4" />
-              <path d="M1 5.5l7 4 7-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              <circle cx="8" cy="5.5" r="3" stroke="currentColor" stroke-width="1.4" />
+              <path d="M2 14c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
             </svg>
             <input
-              v-model="email"
-              type="email"
-              placeholder="you@example.com"
-              autocomplete="email"
-              @focus="focusedField = 'email'"
+              v-model="username"
+              type="text"
+              placeholder="username"
+              autocomplete="username"
+              @focus="focusedField = 'username'"
               @blur="focusedField = ''"
             />
           </div>
@@ -89,12 +89,6 @@
           </div>
         </div>
 
-        <!-- Forgot password -->
-        <div class="row-between">
-          <span></span>
-          <button class="link-btn" type="button" @click="handleForgotPassword">Forgot password?</button>
-        </div>
-
         <!-- Login button -->
         <button class="btn-login" :class="{ loading: isLoading }" @click="handleLogin" :disabled="isLoading">
           <span v-if="!isLoading">Sign In</span>
@@ -119,18 +113,13 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { createClient } from '@supabase/supabase-js'
+import { supabase, usernameToEmail } from '@/lib/supabase'
 
-// ── Supabase setup ──────────────────────────────────────────────────────────
-const supabase = createClient(
-  'https://pffshbkpvbxakvblflzw.supabase.co',
-  'sb_publishable_ilNvaeRqllSPmsbaN2Ro0w_i2GeH6DZ'
-)
 
 const router = useRouter()
 
 // ── State ───────────────────────────────────────────────────────────────────
-const email       = ref('')
+const username    = ref('')
 const password    = ref('')
 const showPassword = ref(false)
 const isLoading   = ref(false)
@@ -148,7 +137,7 @@ function clearMessages() {
 async function handleLogin() {
   clearMessages()
 
-  if (!email.value || !password.value) {
+  if (!username.value || !password.value) {
     errorMsg.value = 'Please fill in all fields.'
     return
   }
@@ -156,7 +145,7 @@ async function handleLogin() {
   isLoading.value = true
 
   const { error } = await supabase.auth.signInWithPassword({
-    email: email.value,
+    email: usernameToEmail(username.value),
     password: password.value,
   })
 
@@ -167,26 +156,6 @@ async function handleLogin() {
   } else {
     console.log('Login successful!')
     router.push('/dashboard')   // redirect to your face-recognition dashboard
-  }
-}
-
-// ── Forgot password ─────────────────────────────────────────────────────────
-async function handleForgotPassword() {
-  clearMessages()
-
-  if (!email.value) {
-    errorMsg.value = 'Enter your email address first.'
-    return
-  }
-
-  const { error } = await supabase.auth.resetPasswordForEmail(email.value, {
-    redirectTo: `${window.location.origin}/reset-password`,
-  })
-
-  if (error) {
-    errorMsg.value = error.message
-  } else {
-    successMsg.value = 'Password reset link sent — check your inbox.'
   }
 }
 

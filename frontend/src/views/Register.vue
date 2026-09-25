@@ -61,20 +61,20 @@
           </div>
         </div>
 
-        <!-- Email -->
-        <div class="field" :class="{ focused: focusedField === 'email', filled: email }">
-          <label>Email address</label>
+        <!-- Username -->
+        <div class="field" :class="{ focused: focusedField === 'username', filled: username }">
+          <label>Username</label>
           <div class="input-wrap">
             <svg class="field-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.4" />
-              <path d="M1 5.5l7 4 7-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              <circle cx="8" cy="5.5" r="3" stroke="currentColor" stroke-width="1.4" />
+              <path d="M2 14c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
             </svg>
             <input
-              v-model="email"
-              type="email"
-              placeholder="you@example.com"
-              autocomplete="email"
-              @focus="focusedField = 'email'"
+              v-model="username"
+              type="text"
+              placeholder="username"
+              autocomplete="username"
+              @focus="focusedField = 'username'"
               @blur="focusedField = ''"
             />
           </div>
@@ -184,19 +184,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { createClient } from '@supabase/supabase-js'
+import { supabase, usernameToEmail } from '@/lib/supabase'
 
-// ── Supabase ────────────────────────────────────────────────────────────────
-const supabase = createClient(
-  'https://pffshbkpvbxakvblflzw.supabase.co',
-  'sb_publishable_ilNvaeRqllSPmsbaN2Ro0w_i2GeH6DZ'
-)
 
 const router = useRouter()
 
 // ── State ───────────────────────────────────────────────────────────────────
 const fullName       = ref('')
-const email          = ref('')
+const username       = ref('')
 const password       = ref('')
 const confirmPassword = ref('')
 const showPassword   = ref(false)
@@ -207,17 +202,17 @@ const errorMsg       = ref('')
 const successMsg     = ref('')
 
 // ── Password strength ────────────────────────────────────────────────────────
-// const strengthScore = computed(() => {
-//   const p = password.value
-//   if (!p) return 0
-//   let score = 0
-//   if (p.length >= 8)  score++
-//   if (p.length >= 12) score++
-//   if (/[A-Z]/.test(p)) score++
-//   if (/[0-9]/.test(p)) score++
-//   if (/[^A-Za-z0-9]/.test(p)) score++
-//   return score
-// })
+const strengthScore = computed(() => {
+  const p = password.value
+  if (!p) return 0
+  let score = 0
+  if (p.length >= 8)  score++
+  if (p.length >= 12) score++
+  if (/[A-Z]/.test(p)) score++
+  if (/[0-9]/.test(p)) score++
+  if (/[^A-Za-z0-9]/.test(p)) score++
+  return score
+})
 
 const strengthPercent = computed(() => (strengthScore.value / 5) * 100)
 
@@ -248,8 +243,12 @@ function clearMessages() {
 async function handleRegister() {
   clearMessages()
 
-  if (!fullName.value || !email.value || !password.value || !confirmPassword.value) {
+  if (!fullName.value || !username.value || !password.value || !confirmPassword.value) {
     errorMsg.value = 'Please fill in all fields.'
+    return
+  }
+  if (!/^[a-z0-9_.-]{3,32}$/i.test(username.value.trim())) {
+    errorMsg.value = 'Username must be 3-32 characters: letters, numbers, _ . -'
     return
   }
   if (password.value.length < 8) {
@@ -264,7 +263,7 @@ async function handleRegister() {
   isLoading.value = true
 
   const { error } = await supabase.auth.signUp({
-    email: email.value,
+    email: usernameToEmail(username.value),
     password: password.value,
     options: {
       data: { full_name: fullName.value },
@@ -276,7 +275,7 @@ async function handleRegister() {
   if (error) {
     errorMsg.value = error.message
   } else {
-    successMsg.value = 'Account created! Check your email to confirm your address.'
+    successMsg.value = 'Account created! Redirecting to login…'
     setTimeout(() => router.push('/login'), 3000)
   }
 }
