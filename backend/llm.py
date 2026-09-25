@@ -1,6 +1,8 @@
+import re
+
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+from config import OLLAMA_URL, SUMMARY_MODEL, SUMMARY_TIMEOUT
 
 
 def generate_summary(transcript: str):
@@ -11,7 +13,7 @@ def generate_summary(transcript: str):
         Use first-person perspective for the patient (e.g., “enquired about YOUR day” instead of quoting full questions).
         Generalize personal or vague questions (like “how is your day?”) into concise, meaningful actions or intents.
         Focus on key events, topics, or interactions, ignoring filler or small talk.
-        Keep it simple, actionable, and context-aware.
+        Keep it simple, actionable, and context-aware. Write the summary in English.
 
         Example:
         Input: "Patient: How are you today? Nurse: I'm fine, thanks. Patient: I feel dizzy."
@@ -21,14 +23,16 @@ def generate_summary(transcript: str):
         {transcript}
         """
 
-        res = requests.post(OLLAMA_URL, json={
-            "model": "qwen3:8b",
+        res = requests.post(f"{OLLAMA_URL}/api/generate", json={
+            "model": SUMMARY_MODEL,
             "prompt": prompt,
             "stream": False
-        })
+        }, timeout=SUMMARY_TIMEOUT)
+        res.raise_for_status()
 
-        data = res.json()
-        return data.get("response", "").strip()
+        text = res.json().get("response", "")
+        # local reasoning models (e.g. qwen3) prepend their reasoning in <think> tags
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
 
     except Exception as e:
         print("Ollama error:", e)

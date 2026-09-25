@@ -22,7 +22,10 @@ async def get_current_user(
         if not res.user:
             raise HTTPException(401, "Invalid token")
 
-        return {"sub": res.user.id}
+        meta = res.user.user_metadata or {}
+        email = res.user.email or ""
+        username = email[: -len("@persona-lens.local")] if email.endswith("@persona-lens.local") else email
+        return {"sub": res.user.id, "username": username, "full_name": (meta.get("full_name") or "").strip()}
 
     except Exception as e:
         raise HTTPException(401, f"Auth error: {str(e)}")
